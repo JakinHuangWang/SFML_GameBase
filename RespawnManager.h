@@ -9,17 +9,18 @@
 #include <map>
 #include <vector>
 
+using namespace Engine;
+
 template <typename T>
-class RespawnManager : public Engine::GameObject
+class RespawnManager : public GameObject
 {
 public:
 
-	RespawnManager(sf::Sprite& sprite, std::vector<sf::Vector2f> respawnPositions, int max, int respawnSpeed)
+	RespawnManager(sf::Sprite& sprite, int max, int respawnSpeed)
 	{
 		this->max = max;
 		this->respawnSpeed = respawnSpeed;
 		this->sprite = sprite;
-		this->respawnPositions = respawnPositions;
 	}
 
 	void died(T* character)
@@ -28,8 +29,7 @@ public:
 	}
 
 private:
-	std::vector<sf::Vector2f> respawnPositions;
-	std::map<GameObjectID, T*> characters;
+	std::map<Engine::GameObjectID, T*> characters;
 	int max;
 	int respawnSpeed;
 	int cooldown = 0;
@@ -37,14 +37,19 @@ private:
 	void EveryFrame(uint64_t frameNumber)
 	{
 		if (this->characters.size() >= this->max) { return; } //don't spawn if at max
-		srand(time(0));
+		srand(frameNumber * this->getID()); // use frameNumber and ID as seed
 		if (cooldown == 0)
 		{
-			cooldown = respawnSpeed;
+			cooldown = respawnSpeed + ((rand() % 120) - 60); //randomize respawn rate +/- 1 second
+			if (cooldown <= 10) { cooldown = 10; }
 			const TileMap* map = this->screen->getMap();
-			int randPosition = rand() % this->respawnPositions.size();
-			sf::Vector2f position = this->respawnPositions[randPosition];
-			std::cout << position.x << ", "<< position.y << std::endl;
+			sf::Vector2f position;
+			do
+			{
+				// add and subtract numbers here to prevent the sprite from respawning near the edge
+				position.x = rand() % static_cast<int>(map->tileSize().x * map->width() - 500) + 250;
+				position.y = rand() % static_cast<int>(map->tileSize().y * map->height() - 500) + 250;
+			} while (map->isObstacle(position));
 			sprite.setPosition(position);
 			this->add(sprite);
 		}
@@ -56,10 +61,9 @@ private:
 
 	void add(sf::Sprite& sprite)
 	{
-		T* ptr = new T(sprite);
+		T* ptr = new T(sprite, this);
 		this->screen->add(ptr);
 		this->characters[ptr->getID()] = ptr;
 	}
 };
 #endif
-
