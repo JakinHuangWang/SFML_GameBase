@@ -6,9 +6,14 @@
 #include <fstream>
 #include <stdlib.h>
 
-namespace Engine {
+#define F(n) static_cast<float>(n)
+#define I(n) static_cast<int>(n)
+
+namespace Engine
+{
 	class TileMap : public sf::Drawable, public sf::Transformable
 	{
+
 	public:
 
 		bool load(const std::string& tileset, const std::string& mapTable)
@@ -41,39 +46,95 @@ namespace Engine {
 					sf::Vertex* quad = &m_vertices[(i + j * _width) * 4];
 
 					// define its 4 corners
-					quad[0].position = sf::Vector2f(i * this->_tileSize.x, j * this->_tileSize.y);
-					quad[1].position = sf::Vector2f((i + 1) * this->_tileSize.x, j * this->_tileSize.y);
-					quad[2].position = sf::Vector2f((i + 1) * this->_tileSize.x, (j + 1) * this->_tileSize.y);
-					quad[3].position = sf::Vector2f(i * this->_tileSize.x, (j + 1) * this->_tileSize.y);
+
+					quad[0].position = sf::Vector2f(F(i * this->_tileSize.x), F(j * this->_tileSize.y));
+					quad[1].position = sf::Vector2f(F((i + 1) * this->_tileSize.x), F(j * this->_tileSize.y));
+					quad[2].position = sf::Vector2f(F((i + 1) * this->_tileSize.x), F((j + 1) * this->_tileSize.y));
+					quad[3].position = sf::Vector2f(F(i * this->_tileSize.x), F((j + 1) * this->_tileSize.y));
 
 					// define its 4 texture coordinates
-					quad[0].texCoords = sf::Vector2f(tu * this->_tileSize.x, tv * this->_tileSize.y);
-					quad[1].texCoords = sf::Vector2f((tu + 1) * this->_tileSize.x, tv * this->_tileSize.y);
-					quad[2].texCoords = sf::Vector2f((tu + 1) * this->_tileSize.x, (tv + 1) * this->_tileSize.y);
-					quad[3].texCoords = sf::Vector2f(tu * this->_tileSize.x, (tv + 1) * this->_tileSize.y);
+					quad[0].texCoords = sf::Vector2f(F(tu * this->_tileSize.x), F(tv * this->_tileSize.y));
+					quad[1].texCoords = sf::Vector2f(F((tu + 1) * this->_tileSize.x), F(tv * this->_tileSize.y));
+					quad[2].texCoords = sf::Vector2f(F((tu + 1) * this->_tileSize.x), F((tv + 1) * this->_tileSize.y));
+					quad[3].texCoords = sf::Vector2f(F(tu * this->_tileSize.x), F((tv + 1) * this->_tileSize.y));
+				}
+			}
+
+			//initialize safe spawn positions
+			for (unsigned int i = 1; i < this->_width - 1; i++)
+			{
+				for (unsigned int j = 1; j < this->_height - 1; j++)
+				{
+					bool anyObstacles = false;
+					for (auto tile : {
+						this->getTileAt(i - 1, j - 1),
+						this->getTileAt(i - 1, j),
+						this->getTileAt(i, j - 1),
+						this->getTileAt(i + 1, j + 1),
+						this->getTileAt(i + 1, j),
+						this->getTileAt(i, j + 1),
+						this->getTileAt(i - 1, j + 1),
+						this->getTileAt(i + 1, j - 1)
+						})
+					{
+						if (isTileTypeObstacle(tile))
+						{
+							anyObstacles = true;
+							break;
+						}
+					}
+					if (!anyObstacles)
+					{
+						sf::Vector2f pos = this->getTileCenter(i, j);
+						this->safeSpawnPositions.push_back(pos);
+					}
 				}
 			}
 
 			return true;
 		}
 
+		static bool isTileTypeObstacle(int tileType)
+		{
+			return (tileType == 0 || tileType == 1 || tileType == 2 || tileType == 9 || tileType == 10 || tileType == 11 || tileType == 18 || tileType == 19 || tileType == 20);
+		}
+
+		static bool isTileTypeTrap(int tileType)
+		{
+			return (tileType == 6 || tileType == 7 || tileType == 8 || tileType == 15 || tileType == 16 || tileType == 17 || tileType == 25 || tileType == 26);
+		}
+
 		bool isObstacle(sf::Vector2f position) const
 		{
-			int row = position.x / this->tileSize().x;
-			int column = position.y / this->tileSize().y;
+			int row = I(position.x / F(this->tileSize().x));
+			int column = I(position.y / F(this->tileSize().y));
 			int tileType = this->getTileAt(row, column);
-			if (tileType == 5 || tileType == 6 || tileType == 7 || tileType == 19 || tileType == 20
-				|| tileType == 21 || tileType == 33 || tileType == 34 || tileType == 35)
-				return true;
-			else
-				return false;
+			return isTileTypeObstacle(tileType);
+		}
+
+		bool isTrap(sf::Vector2f position) const
+		{
+			int row = I(position.x / F(this->tileSize().x));
+			int column = I(position.y / F(this->tileSize().y));
+			int tileType = this->getTileAt(row, column);
+			return isTileTypeTrap(tileType);
+		}
+
+		sf::Vector2f getTileCenter(int i, int j) const
+		{
+			return { F(this->tileSize().x * i), F(this->tileSize().x * j) };
+		}
+
+		const std::vector<sf::Vector2f>& getSafeSpawnPositions() const
+		{
+			return this->safeSpawnPositions;
 		}
 
 		sf::FloatRect currTile(sf::Vector2f position) const
 		{
-			int row = position.x / this->tileSize().x;
-			int column = position.y / this->tileSize().y;
-			return sf::FloatRect(row * this->tileSize().x, column * this->tileSize().y, this->tileSize().x, this->tileSize().y);
+			float row = position.x / F(this->tileSize().x);
+			float column = position.y / F(this->tileSize().y);
+			return sf::FloatRect(row * this->tileSize().x, column * F(this->tileSize().y), F(this->tileSize().x), F(this->tileSize().y));
 		}
 
 		unsigned int width() const
@@ -96,8 +157,8 @@ namespace Engine {
 			return tiles[i + j * this->width()];
 		}
 
-		int * readFromFile(std::string mapTable) {
-
+		int* readFromFile(std::string mapTable)
+		{
 			std::ifstream fin(mapTable.c_str());
 
 			if (!fin) {
@@ -136,7 +197,8 @@ namespace Engine {
 			// draw the vertex array
 			target.draw(m_vertices, states);
 		}
-
+		
+		std::vector<sf::Vector2f> safeSpawnPositions;
 		sf::Vector2u _tileSize;
 		unsigned int _width;
 		unsigned int _height;
@@ -145,5 +207,8 @@ namespace Engine {
 		sf::Texture m_tileset;
 	};
 }
+
+#undef F
+#undef I
 
 #endif

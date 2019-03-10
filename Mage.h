@@ -1,18 +1,44 @@
 #ifndef MAGE_HEADER
 #define MAGE_HEADER
 
+#include <ctime>
+#include <cmath>
+#include <unordered_set>
 #include "GameObject.h"
 #include "RespawnManager.h"
 #include "ZombieBlast.h"
-#include "Bullet.h"
+#include "MageBlast.h"
 #include "Screen.h"
 #include "DifficultySettings.h"
-#include <ctime>
-#include <cmath>
+#include "Score.h"
 
 template<typename T> class RespawnManager;
 
 static int numMagesAlive;
+
+class MageHealthBar : public Engine::GraphicalGameObject
+{
+private:
+	sf::RectangleShape* rectPtr() { return dynamic_cast<sf::RectangleShape*>(this->graphic); }
+public:
+	MageHealthBar() : GraphicalGameObject(sf::RectangleShape())
+	{
+		sf::RectangleShape* rect = this->rectPtr();
+		rect->setFillColor({ 50, 255, 50, 140 });
+		rect->setSize({ 37.f, 5.f });
+		this->blockingCollision = false;
+		this->ignoreObstacles = true;
+	}
+	void setPosition(sf::Vector2f pos)
+	{
+		this->rectPtr()->setPosition(pos);
+	}
+	void setHealth(int health)
+	{
+		//float length = static_cast<float>(health) * 0.1f;
+		//this->rectPtr()->setScale(length, 1.f);
+	}
+};
 
 class Mage : public Engine::GraphicalGameObject
 {
@@ -24,14 +50,20 @@ private:
 	bool D_KeyHeld = false;
 	bool alive;
 	int deathCount;
+	int health = 3 + DifficultySettings::Mage::mageHealthModifier;
+	std::unordered_set<GameObjectID> blastsHitBy;
 	bool isShooting;
 	uint64_t internalClock = 0;
-	sf::Vector2f bullet_position;
 	int bullet_cooldown;
 	sf::Vector2u textureSize;
 	sf::Vector2u imageCount;
 	sf::Vector2u currentImage;
+	MageHealthBar* healthBar;
 	RespawnManager<Mage>* respawnManager = nullptr;
+	sf::Sprite* spritePtr()
+	{
+		return dynamic_cast<sf::Sprite*>(this->graphic);
+	}
 public:
 	Mage(sf::Sprite s, RespawnManager<Mage>* respawnManager) : Mage(s)
 	{
@@ -48,69 +80,75 @@ public:
 		deathCount = 0;
 		isShooting = false;
 		bullet_cooldown = 0;
+
+		W_KeyHeld = false;
+		A_KeyHeld = false;
+		S_KeyHeld = false;
+		D_KeyHeld = false;
 		switch (rand() % 4)
 		{
 		case 0:
 			W_KeyHeld = true;
-			A_KeyHeld = false;
-			S_KeyHeld = false;
-			D_KeyHeld = false;
 			break;
 		case 1:
 			A_KeyHeld = true;
-			W_KeyHeld = false;
-			S_KeyHeld = false;
-			D_KeyHeld = false;
 			break;
 		case 2:
 			S_KeyHeld = true;
-			A_KeyHeld = false;
-			W_KeyHeld = false;
-			D_KeyHeld = false;
 			break;
 		case 3:
 			D_KeyHeld = true;
-			A_KeyHeld = false;
-			S_KeyHeld = false;
-			W_KeyHeld = false;
 			break;
 		}
+
 		numMagesAlive++;
+	}
+	void AddedToScreen()
+	{
+		this->healthBar = new MageHealthBar();
+		sf::Vector2f pos = this->spritePtr()->getPosition();
+		pos.y -= 10.f;
+		pos.x += 5.f;
+		this->healthBar->setHealth(this->health);
+		this->healthBar->setPosition(pos);
+		this->screen->add(this->healthBar);
 	}
 	void EveryFrame(uint64_t f)
 	{
 		internalClock++;
-		srand(time(0));
+		srand(static_cast<unsigned int>(time(0) * this->getID()));
 		if (alive)
 		{
+			sf::Vector2f healthBarPos = this->spritePtr()->getPosition();
+			healthBarPos.y -= 10.f;
+			healthBarPos.x += 5.f;
+			this->healthBar->setPosition(healthBarPos);
 			if (internalClock % 120 == 0)
 			{
-				switch (rand() % 4)
+				GraphicalGameObject* player = dynamic_cast<GraphicalGameObject*>(this->screen->getMainCharacter());
+				sf::Vector2f playerPosition = dynamic_cast<sf::Transformable*>(player->getGraphic())->getPosition();
+				sf::Vector2f myPosition = this->spritePtr()->getPosition();
+				DIRECTION xDirection = (playerPosition.x > myPosition.x) ? DIRECTION::RIGHT : DIRECTION::LEFT;
+				DIRECTION yDirection = (playerPosition.y > myPosition.y) ? DIRECTION::DOWN : DIRECTION::UP;
+				float a = (playerPosition.x - myPosition.x);
+				float b = (playerPosition.y - myPosition.y);
+				float distance = sqrt(a*a + b * b);
+
+				this->W_KeyHeld = false;
+				this->A_KeyHeld = false;
+				this->S_KeyHeld = false;
+				this->D_KeyHeld = false;
+
+				int choice = rand() % 2;
+				if (choice == 0)
 				{
-				case 0:
-					W_KeyHeld = true;
-					A_KeyHeld = false;
-					S_KeyHeld = false;
-					D_KeyHeld = false;
-					break;
-				case 1:
-					A_KeyHeld = true;
-					W_KeyHeld = false;
-					S_KeyHeld = false;
-					D_KeyHeld = false;
-					break;
-				case 2:
-					S_KeyHeld = true;
-					A_KeyHeld = false;
-					W_KeyHeld = false;
-					D_KeyHeld = false;
-					break;
-				case 3:
-					D_KeyHeld = true;
-					A_KeyHeld = false;
-					S_KeyHeld = false;
-					W_KeyHeld = false;
-					break;
+					if (xDirection == DIRECTION::RIGHT) { this->D_KeyHeld = true; }
+					else { this->A_KeyHeld = true; }
+				}
+				else
+				{
+					if (yDirection == DIRECTION::DOWN) { this->S_KeyHeld = true; }
+					else { this->W_KeyHeld = true; }
 				}
 			}
 			if (this->W_KeyHeld)
@@ -125,10 +163,6 @@ public:
 					imageCount.y = 7;
 					isShooting = true;
 					bullet_cooldown = 0;
-					bullet_position = this->spritePtr()->getPosition();
-					bullet_position.x += textureSize.x / 4;
-					Bullet* bullet = new Bullet(bullet_position, DIRECTION::UP);
-					this->screen->add(bullet);
 				}
 
 			}
@@ -144,10 +178,6 @@ public:
 					imageCount.y = 5;
 					isShooting = true;
 					bullet_cooldown = 0;
-					bullet_position = this->spritePtr()->getPosition();
-					bullet_position.y += textureSize.y / 4;
-					Bullet* bullet = new Bullet(bullet_position, DIRECTION::LEFT);
-					this->screen->add(bullet);
 				}
 			}
 			if (this->S_KeyHeld)
@@ -162,11 +192,6 @@ public:
 					imageCount.y = 4;
 					isShooting = true;
 					bullet_cooldown = 0;
-					bullet_position = this->spritePtr()->getPosition();
-					bullet_position.x += textureSize.x / 4;
-					bullet_position.y += textureSize.y;
-					Bullet* bullet = new Bullet(bullet_position, DIRECTION::DOWN);
-					this->screen->add(bullet);
 				}
 			}
 			if (this->D_KeyHeld)
@@ -182,13 +207,18 @@ public:
 					imageCount.y = 6;
 					isShooting = true;
 					bullet_cooldown = 0;
-					bullet_position = this->spritePtr()->getPosition();
-					bullet_position.x += textureSize.x;
-					bullet_position.y += textureSize.y / 4;
-					Bullet* bullet = new Bullet(bullet_position, DIRECTION::RIGHT);
-					this->screen->add(bullet);
 				}
 			}
+
+
+			if (this->internalClock % 100 == 0)
+			{
+				sf::Vector2f pos = this->spritePtr()->getPosition();
+				sf::Vector2f playerPos = dynamic_cast<sf::Transformable*>(dynamic_cast<GraphicalGameObject*>(this->screen->getMainCharacter())->getGraphic())->getPosition();
+				MageBlast* blast = new MageBlast(pos, playerPos, 2.4 + static_cast<double>(DifficultySettings::Mage::blastSpeedModifier), 130);
+				this->screen->add(blast);
+			}
+
 			// shooting delay
 			bullet_cooldown++;
 			if (bullet_cooldown == 50)
@@ -231,24 +261,30 @@ public:
 	{
 		if (alive)
 		{
-			if (dynamic_cast<ZombieBlast*>(&other))
+			if (ZombieBlast* blast = dynamic_cast<ZombieBlast*>(&other))
 			{
+				if (this->blastsHitBy.find(blast->getID()) != this->blastsHitBy.end()) { return; }
+				this->blastsHitBy.insert(blast->getID());
+				this->health -= blast->getDamage();
+				this->healthBar->setHealth(this->health);
+				if (this->health > 0) { return; }
 				if (this->respawnManager) { this->respawnManager->died(this); }
-				std::cout << this->W_KeyHeld << this->A_KeyHeld << this->S_KeyHeld << this->D_KeyHeld << std::endl;
 				alive = false;
 				numMagesAlive--;
 				DifficultySettings::Score::cumulativeBonusMultiplierCurrent = fmin(DifficultySettings::Score::cumulativeBonusMultiplierMax, DifficultySettings::Score::cumulativeBonusMultiplierCurrent + DifficultySettings::Score::cumulativeBonusMultiplier);
 				(*Engine::scorePtr) += DifficultySettings::Score::applyMultipliers(20);
+				Engine::soundPlayer.play(SoundEffect::ID::MageDeath, 30.f);
+				this->screen->remove(this->healthBar);
 			}
 		}
 	}
-	bool isAlive()
+	bool isAlive() const
 	{
 		return this->alive;
 	}
-	sf::Sprite* spritePtr()
+	int getHealth() const
 	{
-		return dynamic_cast<sf::Sprite*>(this->graphic);
+		return this->health;
 	}
 };
 

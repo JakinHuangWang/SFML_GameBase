@@ -10,12 +10,16 @@
 #include "GameObject.h"
 #include "MainCharacter.h"
 #include "Mage.h"
+#include "AntiMagePotion.h"
 #include "Citizen.h"
 #include "SampleUIObject.h"
 #include "SampleUIText.h"
 #include "Score.h"
 #include "HealthBar.h"
 #include "RespawnManager.h"
+#include "DifficultySettings.h"
+#include "PotionUI.h"
+#include "TimerUI.h"
 
 using namespace Engine;
 
@@ -27,17 +31,33 @@ public:
 	{
 		static Screen levelScreen;
 		static TileMap map;
-		
-		map.load("map.png", "map.txt");
+
+		map.load(DifficultySettings::Map::picture, DifficultySettings::Map::fileName);
 		levelScreen.addMap(&map);
 
 		sf::Sprite m_Sprite;
-		m_Sprite.setPosition(Screen::windowWidth / 2, Screen::windowHeight / 2);
+		m_Sprite.setPosition(static_cast<float>(map.width() * map.tileSize().x / 2),
+			static_cast<float>(map.height() * map.tileSize().y / 2));
 		static sf::Texture m_Texture;
 		m_Texture.loadFromFile("zombie.png");
 		m_Sprite.setTexture(m_Texture);
 		MainCharacter* mc_ptr = new MainCharacter(m_Sprite);
 		levelScreen.addMainCharacter(mc_ptr);
+
+		static sf::Texture potion_texture;
+		potion_texture.loadFromFile("antimage_potion.png");
+		sf::Sprite potion;
+		potion.setTexture(potion_texture);
+		static RespawnManager<AntiMagePotion> potionMng(potion, 10, 200);
+		levelScreen.add(&potionMng);
+
+		static sf::Texture potionUI_texture;
+		potionUI_texture.loadFromFile("brain_icon.png");
+		sf::Sprite potion_icon;
+		potion_icon.setTexture(potionUI_texture);
+		static PotionUI potionUI(potion_icon);
+		potionUI.setCharacter(mc_ptr);
+		levelScreen.addUIObject(&potionUI);
 
 		static sf::Texture citizen_boy_texture;
 		citizen_boy_texture.loadFromFile("boy.png");
@@ -93,7 +113,18 @@ public:
 		static HealthBar healthbar;
 		healthbar.setCharacter(mc_ptr);
 		levelScreen.addUIObject(&healthbar);
-		
+
+		//set up the score object
+		static sf::Text s;
+		static Score score(s);
+		Engine::scorePtr = &score;
+		levelScreen.addUIObject(&score);
+
+		static sf::Text t;
+		static TimerUI timer(t);
+		timer.setCharacter(mc_ptr);
+		levelScreen.addUIObject(&timer);
+
 		levelScreen.render();
 	}
 };
