@@ -1,5 +1,6 @@
 #include "Screen.h"
 #include "Menu.h"
+#include "ScoreBoard.h"
 
 using namespace Engine;
 
@@ -9,8 +10,9 @@ int main(int argc, char** argv)
 	Screen::windowWidth = 1024;
 	Screen::windowHeight = 768;
 	Screen::windowTitle = "Game!";
-
-	mainMenu.start();
+	
+	Menu* menu = new Menu();
+	menu->start();
 
 	return 0;
 }

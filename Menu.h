@@ -7,6 +7,7 @@
 #include "UIButton.h"
 #include "TestLevel.h"
 #include <vector>
+#include <string>
 
 using namespace Engine;
 
@@ -18,14 +19,12 @@ namespace Engine
 		Menu();
 		~Menu();
 		void start();
-		void startTestLevel();
+		void startTestLevel(std::string playerName);
 	private:
 		std::vector<GameObject*> menuObjects;
 		Screen menuScreen;
 		TestLevel testLevel;
 	};
-
-	static Menu mainMenu;
 }
 
 #endif

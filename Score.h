@@ -16,7 +16,7 @@ namespace Engine
 		{
 			font.loadFromFile("zombie.ttf");
 			this->text()->setFont(font);
-			this->text()->Bold;
+			this->text()->setStyle(sf::Text::Bold);
 			this->text()->setOutlineColor(sf::Color(179, 45, 0));
 			this->text()->setOutlineThickness(2.f);
 			this->text()->setFillColor(sf::Color::Black);
@@ -49,8 +49,17 @@ namespace Engine
 		}
 		void set(int n)
 		{
+			if (this->frozen) { return; }
 			this->number = n;
 			this->text()->setString("Score: " + std::to_string(number));
+		}
+		int get() const
+		{
+			return this->number;
+		}
+		void freeze()
+		{
+			frozen = true;
 		}
 		void EveryFrame(uint64_t f) {
 			int n = number, count = 0;
@@ -65,6 +74,7 @@ namespace Engine
 			}
 		}
 	private:
+		bool frozen;
 		int number = 0;
 		sf::Font font;
 		sf::Text* text() { return dynamic_cast<sf::Text*>(this->getGraphic()); }

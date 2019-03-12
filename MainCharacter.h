@@ -2,6 +2,9 @@
 #define MAIN_CHARACTER_HEADER
 
 #include <cmath>
+#include <ctime>
+#include <vector>
+#include "GameOver.h"
 #include "Score.h"
 #include "Screen.h"
 #include "GameObject.h"
@@ -11,7 +14,6 @@
 #include "DifficultySettings.h"
 #include "MageBlast.h"
 #include "AntiMagePotion.h"
-#include "GameOver.h"
 
 using namespace Engine;
 
@@ -21,6 +23,8 @@ class MainCharacter : public GraphicalGameObject
 	bool A_KeyHeld = false;
 	bool S_KeyHeld = false;
 	bool D_KeyHeld = false;
+	sf::Sprite brainPotion;
+	AntiMagePotion* potionPtr;
 	sf::Texture blast_texture;
 	sf::Texture super_blast_texture;
 	sf::Vector2u textureSize;
@@ -38,23 +42,29 @@ class MainCharacter : public GraphicalGameObject
 	DIRECTION direction;
 	int potionNum = 0;
 	int maxPotionNum = 6;
-	int _health = 30 * 60 * 100;
+	int health = 30 * 60 * 100;
 	int maxHealth = 30 * 60 * 100;
-	int healthDrain = 15;
+	int healthDrain = 20;
 	int additionalDrainPerMage = 2;
-	int eatHeal = 5700;
+	int numCitizenEated = 0;
+	int eatHeal = 6500;
 	int eatDrainFreezeCountdown = 0;
-	int attackHealthCost = 400;
+	int attackHealthCost = 300;
 	int baseSpeed = 3;
 	int speed = 3;
 	int maxSpeed = 4;
 	int speedDecayDelay = 0;
 	int speedRestoreDelay = 0;
 	int colorRestoreDelay = 0;
-	GameOver gameOver;
+	std::vector<sf::Vector2f> spawnPositions;
+	std::string name;
 public:
-	MainCharacter(sf::Sprite s) : GraphicalGameObject(s)
+	MainCharacter(sf::Sprite s, std::string name) : GraphicalGameObject(s)
 	{
+		this->name = name;
+		static sf::Texture potion_texutre;
+		potion_texutre.loadFromFile("antimage_potion.png");
+		brainPotion.setTexture(potion_texutre);
 		textureSize = this->sprite()->getTexture()->getSize();
 		textureSize.x /= 4;
 		textureSize.y /= 12;
@@ -137,12 +147,12 @@ public:
 	}
 	void MouseButtonReleased(sf::Event e)
 	{
-		if (_health > 0)
+		if (health > 0)
 		{
 			if (e.mouseButton.button == sf::Mouse::Left)
 			{
 				Engine::soundPlayer.play(SoundEffect::ID::ZombieAttack, 40.f);
-				if (this->_health > 0.2 * this->maxHealth) { this->changeHealth(-1 * attackHealthCost); } //health cost of ranged attack only applies if health is above 20%
+				if (this->health > 0.2 * this->maxHealth) { this->changeHealth(-1 * attackHealthCost); } //health cost of ranged attack only applies if health is above 20%
 				sf::Vector2i mousePos = this->screen->getMousePosition();
 				sf::Vector2f distance = static_cast<sf::Vector2f>(mousePos) - this->sprite()->getPosition();
 				sf::Vector2f shotOrigin = this->sprite()->getPosition();
@@ -187,7 +197,7 @@ public:
 		{
 			inTrap = false;
 		}
-		if (_health > 0)
+		if (health > 0)
 		{
 			float fSpeed = static_cast<float>(this->speed);
 			if (f % 20 == 0 && (this->W_KeyHeld || this->A_KeyHeld || this->S_KeyHeld || this->D_KeyHeld))
@@ -286,9 +296,7 @@ public:
 			}
 			if (imageCount.x == 3)
 			{
-				this->sprite()->setColor(sf::Color(0, 0, 0, 0));
-				isDead = true;
-				this->screen->addUIObject(&this->gameOver);
+				this->die();
 			}
 		}
 
@@ -306,31 +314,49 @@ public:
 			return;
 		}
 		float highHealthDrainPenalty = DifficultySettings::Player::highHealthDrainPenalty;
-		float drainPenalty = 1.0f + (highHealthDrainPenalty * (static_cast<float>(this->_health) / static_cast<float>(this->maxHealth)));
+		float drainPenalty = 1.0f + (highHealthDrainPenalty * (static_cast<float>(this->health) / static_cast<float>(this->maxHealth)));
 		int baseDrain = static_cast<int>(static_cast<float>(this->healthDrain) * drainPenalty);
 		int mageDrain = numMagesAlive * (this->additionalDrainPerMage + DifficultySettings::Mage::healthDrainModifier);
 		int totalDrain = baseDrain + mageDrain;
 		this->changeHealth(-1 * totalDrain);
 	}
-	int getHealth()
+	void die()
 	{
-		return _health;
+		if (!isDead)
+		{
+			this->sprite()->setColor(sf::Color(0, 0, 0, 0));
+			isDead = true;
+			scorePtr->freeze();
+			this->screen->addUIObject(new GameOver(scorePtr->get()));
+		}
 	}
-	int getMaxHealth()
+	std::string getName() const
 	{
-		return maxHealth;
+		return this->name;
 	}
-	float getCurrAliveTime()
+	int getHealth() const
 	{
-		return aliveClock.getElapsedTime().asSeconds();
+		return this->health;
 	}
-	float getTotalAliveTime()
+	int getMaxHealth() const
 	{
-		return totalAliveTime;
+		return this->maxHealth;
 	}
-	bool isAlive()
+	float getCurrAliveTime() const
 	{
-		return !startDeath;
+		return this->aliveClock.getElapsedTime().asSeconds();
+	}
+	float getTotalAliveTime() const
+	{
+		return this->totalAliveTime;
+	}
+	int getNumCitizenEated() const
+	{
+		return this->numCitizenEated;
+	}
+	bool isAlive() const
+	{
+		return !this->startDeath;
 	}
 	void setDirection(DIRECTION direction)
 	{
@@ -344,8 +370,8 @@ public:
 	}
 	void changeHealth(int change)
 	{
-		this->_health += change;
-		if (this->_health > this->maxHealth) { this->_health = this->maxHealth; }
+		this->health += change;
+		if (this->health > this->maxHealth) { this->health = this->maxHealth; }
 	}
 	void addPotionNum()
 	{
@@ -368,7 +394,7 @@ public:
 	}
 	void Collision(GraphicalGameObject& other)
 	{
-		if (_health > 0) {
+		if (health > 0) {
 			if (MageBlast* blast = dynamic_cast<MageBlast*>(&other))
 			{
 				if (!isHurt)
@@ -381,7 +407,9 @@ public:
 				{
 					isHurt = false;
 				}
-				int damage = static_cast<int>(static_cast<float>(1000 + DifficultySettings::Mage::attackDamageModifier) / (1.f + 0.01f*(static_cast<float>(blast->getHits()))));
+				float repeatDamageDampening = (1.f + 0.01f*(static_cast<float>(blast->getHits())));
+				if (repeatDamageDampening < 0.5f) { repeatDamageDampening = 0.5f; }
+				int damage = static_cast<int>(static_cast<float>(800 + DifficultySettings::Mage::attackDamageModifier) / repeatDamageDampening);
 				if (damage < 15) { damage = 15; }
 				this->takeDamage(damage);
 				blast->hitPlayer();
@@ -421,8 +449,34 @@ public:
 					break;
 				}
 				citizen->die();
+				this->numCitizenEated++;
+				if (this->numCitizenEated % DifficultySettings::Player::potionMakingCitizenRequired == 0)
+				{
+					srand(static_cast<int>(time(0) << 7));
+					switch (rand() % 4)
+					{
+					case 0:
+						Engine::soundPlayer.play(SoundEffect::ID::ZombieBurp1, 70.f);
+						break;
+					case 1:
+						Engine::soundPlayer.play(SoundEffect::ID::ZombieBurp2, 70.f);
+						break;
+					case 2:
+						Engine::soundPlayer.play(SoundEffect::ID::ZombieBurp3, 50.f);
+						break;
+					case 3:
+						Engine::soundPlayer.play(SoundEffect::ID::ZombieBurp4, 50.f);
+						break;
+					}
+					this->spawnPositions = this->screen->getMap()->getSafeSpawnPositions();
+					size_t randIndex = rand() % spawnPositions.size();
+					sf::Vector2f position = spawnPositions[randIndex];
+					brainPotion.setPosition(position);
+					potionPtr = new AntiMagePotion(brainPotion);
+					this->screen->add(potionPtr);
+				}
 				float missingHealthBonus = DifficultySettings::Player::missingHealthHealBonus;
-				float missingHealthMultiplier = (1.0f + missingHealthBonus) - (missingHealthBonus * (static_cast<float>(this->_health) / static_cast<float>(this->maxHealth)));
+				float missingHealthMultiplier = (1.0f + missingHealthBonus) - (missingHealthBonus * (static_cast<float>(this->health) / static_cast<float>(this->maxHealth)));
 				this->changeHealth(static_cast<int>(static_cast<float>(this->eatHeal) * missingHealthMultiplier));
 				this->changeSpeed(1);
 				this->speedDecayDelay = 60;
@@ -433,8 +487,8 @@ public:
 			{
 				Engine::soundPlayer.play(SoundEffect::ID::Potion, 40.f);
 				this->addPotionNum();
-				this->changeHealth(this->eatHeal / 4);
-				this->eatDrainFreezeCountdown = DifficultySettings::Player::eatDrainFreezeDuration * 2;
+				this->changeHealth(this->eatHeal / 2);
+				this->eatDrainFreezeCountdown = DifficultySettings::Player::eatDrainFreezeDuration * 3;
 				potion->die();
 			}
 		}
