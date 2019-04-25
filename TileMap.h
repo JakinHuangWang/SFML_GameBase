@@ -3,6 +3,7 @@
 
 #include "SFML/Graphics.hpp"
 #include "FileLoadException.h"
+#include "ResourceManager.h"
 #include <iostream>
 #include <fstream>
 #include <cstdlib>
@@ -21,24 +22,28 @@ namespace Engine
 		unsigned int numPerColumn;
 		int* tiles;
 		sf::VertexArray mVertices;
-		sf::Texture mTileset;
+		sf::Texture* mTileset;
 		virtual void draw(sf::RenderTarget& target, sf::RenderStates states) const
 		{
 			// apply the transform
 			states.transform *= getTransform();
 
 			// apply the tileset texture
-			states.texture = &mTileset;
+			states.texture = mTileset;
 
 			// draw the vertex array
 			target.draw(mVertices, states);
+		}
+		sf::Vector2i positionToRowAndColumn(sf::Vector2f position) const
+		{
+			return sf::Vector2i( I(position.x / F(this->tileSize().x)), I(position.y / F(this->tileSize().y)) );
 		}
 	public:
 
 		bool load(const std::string& tileset, const std::string& mapTable)
 		{
 			// load the tileset texture
-			if (!this->mTileset.loadFromFile(tileset)) { return false; }
+			this->mTileset = ResourceManager<sf::Texture>::GetResource(tileset);
 
 			int * tileTable;
 			tileTable = readFromFile(mapTable);
@@ -57,8 +62,8 @@ namespace Engine
 					int tileNumber = tiles[i + j * numPerLine];
 
 					// find its position in the tileset texture
-					int tu = tileNumber % (mTileset.getSize().x / this->tileStdSize.x);
-					int tv = tileNumber / (mTileset.getSize().x / this->tileStdSize.x);
+					int tu = tileNumber % (mTileset->getSize().x / this->tileStdSize.x);
+					int tv = tileNumber / (mTileset->getSize().x / this->tileStdSize.x);
 
 					// get a pointer to the current tile's quad
 					sf::Vertex* quad = &mVertices[(i + j * numPerLine) * 4];
@@ -114,28 +119,27 @@ namespace Engine
 
 		static bool isTileTypeObstacle(int tileType)
 		{
-			return (tileType == 0 || tileType == 1 || tileType == 2 || tileType == 9 || tileType == 10 || tileType == 11 || tileType == 18 || tileType == 19 || tileType == 20);
+			return (tileType < 0 || tileType == 0 || tileType == 1 || tileType == 2 || tileType == 9 || tileType == 10 || tileType == 11 || tileType == 18 || tileType == 19 || tileType == 20);
 		}
 
 		static bool isTileTypeTrap(int tileType)
 		{
 			return (tileType == 6 || tileType == 7 || tileType == 8 || tileType == 15 || tileType == 16 || tileType == 17 || tileType == 25 || tileType == 26);
 		}
+		
+		bool isOutOfBounds(sf::Vector2f position) const
+		{
+			return this->getTileAt(this->positionToRowAndColumn(position)) < 0;
+		}
 
 		bool isObstacle(sf::Vector2f position) const
 		{
-			int row = I(position.x / F(this->tileSize().x));
-			int column = I(position.y / F(this->tileSize().y));
-			int tileType = this->getTileAt(row, column);
-			return isTileTypeObstacle(tileType);
+			return isTileTypeObstacle(this->getTileAt(this->positionToRowAndColumn(position)));
 		}
 
 		bool isTrap(sf::Vector2f position) const
 		{
-			int row = I(position.x / F(this->tileSize().x));
-			int column = I(position.y / F(this->tileSize().y));
-			int tileType = this->getTileAt(row, column);
-			return isTileTypeTrap(tileType);
+			return isTileTypeTrap(this->getTileAt(this->positionToRowAndColumn(position)));
 		}
 
 		sf::Vector2f getTileCenter(int i, int j) const
@@ -146,13 +150,6 @@ namespace Engine
 		const std::vector<sf::Vector2f>& getSafeSpawnPositions() const
 		{
 			return this->safeSpawnPositions;
-		}
-
-		sf::FloatRect currTile(sf::Vector2f position) const
-		{
-			float row = position.x / F(this->tileSize().x);
-			float column = position.y / F(this->tileSize().y);
-			return sf::FloatRect(row * this->tileSize().x, column * F(this->tileSize().y), F(this->tileSize().x), F(this->tileSize().y));
 		}
 
 		unsigned int width() const
@@ -172,7 +169,13 @@ namespace Engine
 
 		int getTileAt(int i, int j) const
 		{
-			return this->tiles[i + j * this->width()];
+			if (i < 1 || j < 1 || i > I(this->width()) || j > I(this->height())) { return -1; }			
+			return this->tiles[i + j * I(this->width())];
+		}
+
+		int getTileAt(sf::Vector2i rowAndColumn) const
+		{
+			return this->getTileAt(rowAndColumn.x, rowAndColumn.y);
 		}
 
 		int* readFromFile(std::string mapTable)

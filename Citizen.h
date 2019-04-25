@@ -11,17 +11,17 @@ using namespace Engine;
 
 template<typename T> class RespawnManager;
 
-class Citizen : public GraphicalGameObject
+class Citizen : StandardEnemy, SpriteSheet
 {
 private:
 	friend class RespawnManager<Citizen>;
-	bool wKeyHeld = false;
-	bool aKeyHeld = false;
-	bool sKeyHeld = false;
-	bool dKeyHeld = false;
-	sf::Vector2u textureSize;
-	sf::Vector2u imageCount;
-	sf::Vector2u currentImage;
+	bool movingUp = false;
+	bool movingLeft = false;
+	bool movingDown = false;
+	bool movingRight = false;
+	//sf::Vector2u textureSize;
+	//sf::Vector2u imageCount;
+	//sf::Vector2u currentImage;
 	RespawnManager<Citizen>* respawnManager = nullptr;
 public:
 	Citizen(sf::Sprite s, RespawnManager<Citizen>* respawnManager) : Citizen(s)
@@ -29,37 +29,35 @@ public:
 		this->respawnManager = respawnManager;
 	}
 
-	Citizen(sf::Sprite s) : GraphicalGameObject(s)
+	Citizen(sf::Sprite s) :
+		GraphicalGameObject(s),
+		Health(1),
+		SpriteSheet(3, 4)
 	{
-		this->textureSize = this->spritePtr()->getTexture()->getSize();
+		/*this->textureSize = this->spritePtr()->getTexture()->getSize();
 		this->textureSize.x /= 3;
 		this->textureSize.y /= 4;
 		this->imageCount.x = 0;
+		this->spritePtr()->setTextureRect(sf::IntRect(this->imageCount.x * this->textureSize.x,
+			this->imageCount.y * this->textureSize.y, this->textureSize.x, this->textureSize.y));*/
+		this->resetSpriteSheet();
+		this->movingUp = false;
+		this->movingLeft = false;
+		this->movingDown = false;
+		this->movingRight = false;
 		switch (rand() % 4)
 		{
 		case 0:
-			this->wKeyHeld = true;
-			this->aKeyHeld = false;
-			this->sKeyHeld = false;
-			this->dKeyHeld = false;
+			this->movingUp = true;
 			break;
 		case 1:
-			this->aKeyHeld = true;
-			this->wKeyHeld = false;
-			this->sKeyHeld = false;
-			this->dKeyHeld = false;
+			this->movingLeft = true;
 			break;
 		case 2:
-			this->sKeyHeld = true;
-			this->aKeyHeld = false;
-			this->wKeyHeld = false;
-			this->dKeyHeld = false;
+			this->movingDown = true;
 			break;
 		case 3:
-			this->dKeyHeld = true;
-			this->aKeyHeld = false;
-			this->sKeyHeld = false;
-			this->wKeyHeld = false;
+			this->movingRight = true;
 			break;
 		default:
 			break;
@@ -70,71 +68,68 @@ public:
 	{
 		if (f % 120 == 0)
 		{
+			this->movingUp = false;
+			this->movingLeft = false;
+			this->movingDown = false;
+			this->movingRight = false;
 			switch (rand() % 4)
 			{
 			case 0:
-				this->wKeyHeld = true;
-				this->aKeyHeld = false;
-				this->sKeyHeld = false;
-				this->dKeyHeld = false;
+				this->movingUp = true;
 				break;
 			case 1:
-				this->aKeyHeld = true;
-				this->wKeyHeld = false;
-				this->sKeyHeld = false;
-				this->dKeyHeld = false;
+				this->movingLeft = true;
 				break;
 			case 2:
-				this->sKeyHeld = true;
-				this->aKeyHeld = false;
-				this->wKeyHeld = false;
-				this->dKeyHeld = false;
+				this->movingDown = true;
 				break;
 			case 3:
-				this->dKeyHeld = true;
-				this->aKeyHeld = false;
-				this->sKeyHeld = false;
-				this->wKeyHeld = false;
+				this->movingRight = true;
 				break;
 			default:
 				break;
 			}
 		}
 
-		if (this->wKeyHeld)
+		float speed = 0.3f + DifficultySettings::Citizen::movementSpeedModifier;
+		if (this->movingUp)
 		{
-			this->imageCount.y = 3;
-			this->spritePtr()->move(0, -0.5);
+			//this->imageCount.y = 3;
+			this->spriteSheetColumn = 3;
+			this->move(Degrees(270.f), speed);
 		}
-		if (this->aKeyHeld)
+		else if (this->movingLeft)
 		{
-			this->imageCount.y = 1;
-			this->spritePtr()->move(-0.5, 0);
+			//this->imageCount.y = 1;
+			this->spriteSheetColumn = 1;
+			this->move(Degrees(180.f), speed);
 		}
-		if (this->sKeyHeld)
+		else if (this->movingDown)
 		{
-			this->imageCount.y = 0;
-			this->spritePtr()->move(0, 0.5);
+			//this->imageCount.y = 0;
+			this->spriteSheetColumn = 0;
+			this->move(Degrees(90.f), speed);
 		}
-		if (this->dKeyHeld)
+		else if (this->movingRight)
 		{
-			this->imageCount.y = 2;
-			this->spritePtr()->move(0.5, 0);
+			//this->imageCount.y = 2
+			this->spriteSheetColumn = 2;
+			this->move(Degrees(0.f), speed);
 		}
 
 		if (f % 20 == 0)
 		{
-			if (this->imageCount.x == 2) { this->imageCount.x = 0; }
-			else { this->imageCount.x++; }
+			//if (this->imageCount.x == 2) { this->imageCount.x = 0; }
+			//else { this->imageCount.x++; }
+			this->spriteSheetRow++;
 		}
 
-		this->spritePtr()->setTextureRect(sf::IntRect(this->imageCount.x * this->textureSize.x,
-			this->imageCount.y * this->textureSize.y, this->textureSize.x, this->textureSize.y));
+		//this->spritePtr()->setTextureRect(sf::IntRect(this->imageCount.x * this->textureSize.x, this->imageCount.y * this->textureSize.y, this->textureSize.x, this->textureSize.y));
 	}
 
-	void Collision(GraphicalGameObject& other)
+	void Collided(Collision* other)
 	{
-		if (dynamic_cast<ZombieBlast*>(&other))
+		if (dynamic_cast<ZombieBlast*>(other))
 		{
 			(*scorePtr) += DifficultySettings::Score::applyMultipliers(1);
 			this->die();

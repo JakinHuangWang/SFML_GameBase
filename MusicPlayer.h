@@ -3,7 +3,15 @@
 
 #include "SFML/Audio.hpp"
 #include "FileLoadException.h"
+#include "ResourceManager.h"
 #include <map>
+#include <string>
+#include <functional>
+
+using std::map;
+using std::string;
+using std::function;
+using Engine::ResourceManager;
 
 namespace Music
 {
@@ -17,53 +25,46 @@ namespace Music
 	};
 }
 
+class MusicWrapper
+{
+public:
+	sf::Music music;
+	bool loadFromFile(string filename)
+	{
+		return music.openFromFile(filename);
+	}
+};
+
 class MusicPlayer : private sf::NonCopyable
 {
 private:
-	sf::Music* mMusic = nullptr;
-	std::map<Music::ID, std::string> mFilenames;
-	float mVolume;
-public:
-	MusicPlayer() : mMusic(), mFilenames(), mVolume(100.f)
+
+	static map<Music::ID, std::string>& getMusicIDMap()
 	{
-		this->mFilenames[Music::ID::Menu] = "theme_menu.ogg";
-		this->mFilenames[Music::ID::TestMode] = "theme_test.ogg";
-		this->mFilenames[Music::ID::EasyGame] = "theme_easy.ogg";
-		this->mFilenames[Music::ID::NormalGame] = "theme_normal.ogg";
-		this->mFilenames[Music::ID::HardGame] = "theme_hard.ogg";
-		this->mFilenames[Music::ID::GameOver] = "theme_gameover.ogg";
+		static map<Music::ID, std::string> musicIDMap;
+		return musicIDMap;
 	}
 
-	~MusicPlayer()
+	static void InitializeIDMap()
 	{
-		delete this->mMusic;
+		static bool initialized = false;
+		if (initialized) { return; }
+		map<Music::ID, std::string>& musicIDMap = getMusicIDMap();
+		musicIDMap[Music::ID::Menu] = "theme_menu.ogg";
+		musicIDMap[Music::ID::TestMode] = "theme_test.ogg";
+		musicIDMap[Music::ID::EasyGame] = "theme_easy.ogg";
+		musicIDMap[Music::ID::NormalGame] = "theme_normal.ogg";
+		musicIDMap[Music::ID::HardGame] = "theme_hard.ogg";
+		musicIDMap[Music::ID::GameOver] = "theme_gameover.ogg";
+		initialized = true;
 	}
 
-	void play(Music::ID theme)
-	{
-		if (!this->mMusic) { this->mMusic = new sf::Music(); }
-		std::string filename = this->mFilenames[theme];
-		if (!this->mMusic->openFromFile(filename)) { throw GameException::SoundFileLoadException(filename); }
-		this->mMusic->setVolume(mVolume);
-		this->mMusic->setLoop(true);
-		this->mMusic->play();
-	}
-
-	void stop()
-	{
-		this->mMusic->stop();
-	}
-
-	void setPaused(bool paused)
-	{
-		if (paused) { this->mMusic->pause(); }
-		else { this->mMusic->play(); }
-	}
-
-	void setVolume(float volume)
-	{
-		this->mMusic->setVolume(volume);
-	}
+public:	
+	static void play(string musicFileName, float volume = 20.f);
+	static void play(Music::ID theme, float volume = 20.f);
+	static void stop();	
+	static void setPaused(bool paused);
+	static void setVolume(float volume);
 };
 
 #endif

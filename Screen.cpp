@@ -1,77 +1,102 @@
 #include "SFML/Graphics.hpp"
 #include "Screen.h"
+#include "GameObject.h"
+#include "GameObjectAttribute.h"
 #include "FileLoadException.h"
+#include "DebugManager.h"
+#include <utility>
+#include <functional>
 
 using namespace Engine;
 
 static bool renderStarted = false;
 static int currentFPS;
 static sf::RenderWindow* windowPtr = nullptr;
-static std::queue<GameObject*> removeQueue;
+static std::queue<std::pair<GameObject*, bool>> removeQueue;
+unsigned int Screen::windowWidth = 0;
+unsigned int Screen::windowHeight = 0;
+const char* Screen::windowTitle = nullptr;
+static Screen* currentScreen;
+static Screen* pendingSwitch;
+bool running = true;
+bool windowInitialized = false;
 
 namespace Engine
-{
-	typedef std::map<GameObjectID, GameObject*> GameObjectMap;
-	unsigned int Screen::windowWidth = 0;
-	unsigned int Screen::windowHeight = 0;
-	const char* Screen::windowTitle = nullptr;
-	static Screen* currentScreen;
-	static Screen* pendingSwitch;
-	bool running = true;
-	bool windowInitialized = false;
-
+{	
 	Screen::Screen() {}
 
 	void Screen::addMap(TileMap* map)
 	{
-		this->map = map;
+		this->tMap = map;
 	}
 
-	void Screen::addMainCharacter(GameObject* mainCharacter)
+	void Screen::addMainCharacter(GraphicalGameObject* mainCharacter)
 	{
 		this->add(mainCharacter);
 		this->mainCharacter = mainCharacter;
 		mainCharacter->AddedToScreen();
 	}
 
-	GameObject* Screen::getMainCharacter() const
-	{
-		return this->mainCharacter;
-	}
-
 	void Screen::add(GameObject* gameObject)
 	{
-		GameObjectMap& map = (dynamic_cast<GraphicalGameObject*>(gameObject)) ? this->gObjects : this->objects;
-		map[gameObject->getID()] = gameObject;
+		if (gameObject == nullptr) { return; }
+		GameObjectID id = gameObject->getID();
+		this->allObjects[id] = gameObject;
+		if (GraphicalGameObject* ggo = dynamic_cast<GraphicalGameObject*>(gameObject)) { this->renderObjects[id] = ggo; }
+		if (GameObjectAttribute::Collision* collisionObject = dynamic_cast<GameObjectAttribute::Collision*>(gameObject)) { this->collisionObjects[id] = collisionObject; }
+		if (GameObjectAttribute::Movement* movingObject = dynamic_cast<GameObjectAttribute::Movement*>(gameObject))
+		{
+			if (dynamic_cast<GameObjectAttribute::TerrainCollision*>(gameObject)) { this->movingObjectsWithTerrainCollision[id] = movingObject; }
+			else { this->movingObjects[id] = movingObject; }
+		}
 		gameObject->screen = this;
 		gameObject->AddedToScreen();
 	}
 
 	void Screen::addUIObject(GameObject* uiObj)
 	{
-		this->uiObjects[uiObj->getID()] = uiObj;
+		#ifdef _DEBUG
+		if (GameObjectAttribute::Collision* collisionObject = dynamic_cast<GameObjectAttribute::Collision*>(uiObj))
+		{ DebugManager::PrintMessage(DebugManager::MessageType::ERROR_REPORTING, "Argument to Screen::addUIObject should not inherit from GameObjectAttribute::Collision. It will not be added to list of collision objects."); }
+		if (GameObjectAttribute::Movement* movingObject = dynamic_cast<GameObjectAttribute::Movement*>(uiObj))
+		{ DebugManager::PrintMessage(DebugManager::MessageType::ERROR_REPORTING, "Argument to Screen::addUIObject should not inherit from GameObjectAttribute::Movement. It will not be added to list of moving objects."); }
+		#endif
+		GameObjectID id = uiObj->getID();
+		this->allObjects[id] = uiObj;
+		if (GraphicalGameObject* ggo = dynamic_cast<GraphicalGameObject*>(uiObj)) { this->uiObjects[id] = ggo; }
 		uiObj->screen = this;
-		uiObj->AddedToScreen();
+		uiObj->AddedToScreen();		
 	}
 
-	void Screen::remove(GameObject* gameObject)
+	GraphicalGameObject* Screen::getMainCharacter() const
+	{
+		return this->mainCharacter;
+	}
+
+	bool Screen::find(GameObject* gameObject)
+	{
+		GameObjectID id = gameObject->getID();
+		return (gameObject == this->mainCharacter) || (this->allObjects.find(id) != this->allObjects.end());
+	}
+
+	void Screen::remove(GameObject* gameObject, bool autoDelete)
 	{
 		if (this != currentScreen)
-		{
-			for (auto map : { &this->objects, &this->gObjects, &this->uiObjects })
+		{	
+			GameObjectID id = gameObject->getID();
+			if (this->allObjects.erase(id) |
+				this->renderObjects.erase(id) |
+				this->uiObjects.erase(id) |
+				this->collisionObjects.erase(id) |
+				this->movingObjects.erase(id) |
+				this->movingObjectsWithTerrainCollision.erase(id))
 			{
-				if (map->find(gameObject->getID()) != map->end())
-				{
-					GameObjectID id = gameObject->getID();
-					map->erase(id);
-					delete gameObject;
-					break;
-				}
+				if (autoDelete) { delete gameObject; }
 			}
 		}
 		else
 		{
-			removeQueue.push(gameObject);
+			removeQueue.push({ gameObject, autoDelete });
 		}
 	}
 
@@ -85,7 +110,7 @@ namespace Engine
 
 	const TileMap* Screen::getMap() const
 	{
-		return this->map;
+		return this->tMap;
 	}
 
 	void Screen::close()
@@ -93,363 +118,295 @@ namespace Engine
 		running = false;
 	}
 
-	void Screen::render(int fps)
+	void Screen::render()
 	{
-		if (fps < 1) { fps = 1; }
-		else if (fps > 1000) { fps = 1000; }
-		currentFPS = fps;
-
+		constexpr int fps = 60;
+		constexpr int frameDurationMicroseconds = 1000000 / fps;
 		unsigned int width = (Screen::windowWidth) ? Screen::windowWidth : 500;
 		unsigned int height = (Screen::windowHeight) ? Screen::windowHeight : 500;
 		const char* title = (Screen::windowTitle) ? Screen::windowTitle : "<no title>";
 		static sf::RenderWindow window(sf::VideoMode(width, height), title, sf::Style::Close);
 		static sf::Clock clock;
 		static uint64_t frameCount = 0;
-
 		sf::View view(sf::Vector2f(static_cast<float>(width / 2), static_cast<float>(height / 2)), sf::Vector2f(static_cast<float>(width), static_cast<float>(height)));
 		windowPtr = &window;
 		window.setView(view);
-
 		if (renderStarted)
 		{
 			pendingSwitch = this;
 			return;
 		}
-		else
-		{
-			pendingSwitch = nullptr;
-		}
+		else { pendingSwitch = nullptr; }
 		currentScreen = this;
 		renderStarted = true;
-
-		//local function used by game loop to iterate over each map of objects for the events
-		static std::function<void(GameObjectMap*, sf::Event)> handleEvents = [](GameObjectMap* objects, sf::Event event)
-		{
-			for (auto const& pair : *objects)
-			{
-				GameObject* obj = pair.second;
-				if (obj->eventsDisabled) { continue; }
-				switch (event.type)
-				{
-				case sf::Event::Resized:
-					obj->Resized(event);
-					break;
-				case sf::Event::LostFocus:
-					obj->LostFocus(event);
-					break;
-				case sf::Event::GainedFocus:
-					obj->GainedFocus(event);
-					break;
-				case sf::Event::TextEntered:
-					obj->TextEntered(event);
-					break;
-				case sf::Event::KeyPressed:
-					obj->KeyPressed(event);
-					break;
-				case sf::Event::KeyReleased:
-					obj->KeyReleased(event);
-					break;
-				case sf::Event::MouseWheelMoved:
-					obj->MouseWheelMoved(event);
-					break;
-				case sf::Event::MouseWheelScrolled:
-					obj->MouseWheelScrolled(event);
-					break;
-				case sf::Event::MouseButtonPressed:
-					obj->MouseButtonPressed(event);
-					break;
-				case sf::Event::MouseButtonReleased:
-					obj->MouseButtonReleased(event);
-					break;
-				case sf::Event::MouseMoved:
-					obj->MouseMoved(event);
-					break;
-				case sf::Event::MouseEntered:
-					obj->MouseEntered(event);
-					break;
-				case sf::Event::MouseLeft:
-					obj->MouseLeft(event);
-					break;
-				case sf::Event::JoystickButtonPressed:
-					obj->JoystickButtonPressed(event);
-					break;
-				case sf::Event::JoystickButtonReleased:
-					obj->JoystickButtonReleased(event);
-					break;
-				case sf::Event::JoystickMoved:
-					obj->JoystickMoved(event);
-					break;
-				case sf::Event::JoystickConnected:
-					obj->JoystickConnected(event);
-					break;
-				case sf::Event::JoystickDisconnected:
-					obj->JoystickDisconnected(event);
-					break;
-				case sf::Event::TouchBegan:
-					obj->TouchBegan(event);
-					break;
-				case sf::Event::TouchMoved:
-					obj->TouchMoved(event);
-					break;
-				case sf::Event::TouchEnded:
-					obj->TouchEnded(event);
-					break;
-				case sf::Event::SensorChanged:
-					obj->SensorChanged(event);
-					break;
-				default:
-					break;
-				}
-			}
-		};
-
+		#ifdef _DEBUG
+		sf::Clock eventClock;
+		sf::Clock collisionClock;
+		sf::Clock movementClock;
+		sf::Clock drawClock;
+		sf::Int64 eventDurationSum = 0;
+		sf::Int64 collisionDurationSum = 0;
+		sf::Int64 movementDurationSum = 0;
+		sf::Int64 drawDurationSum = 0;
+		sf::Int64 frameDurationSum = 0;
+		#endif
+		
+		//game loop
 		while (window.isOpen() && !pendingSwitch)
 		{
-			try
+			clock.restart();
+			#ifdef _DEBUG
+			eventClock.restart();
+			#endif
+
+			for (auto const & pair : this->allObjects)
 			{
-				clock.restart();
+				pair.second->EveryFrame(frameCount);
+			}
 
-				//run the EveryFrame event on all objects
-				for (auto map : { &currentScreen->objects, &currentScreen->gObjects, &currentScreen->uiObjects })
+			sf::Event ev;
+			while (window.pollEvent(ev))
+			{
+				if (ev.type == sf::Event::Closed || !running)
 				{
-					for (auto const& pair : *map)
-					{
-						GameObject* obj = pair.second;
-						if (!obj->eventsDisabled) { obj->EveryFrame(frameCount); }
-					}
+					window.close();
+					return;
 				}
-
-				sf::Event event;
-				while (window.pollEvent(event))
+				else if (ev.type == sf::Event::Resized)
 				{
-					if (event.type == sf::Event::Closed || !running)
-					{
-						window.close();
-						return;
-					}
-					if (event.type == sf::Event::Resized)
-					{
-						// update the view to the new size of the window
-						sf::FloatRect visibleArea(0.f, 0.f, static_cast<float>(event.size.width), static_cast<float>(event.size.height));
-						view = sf::View(visibleArea);
-					}
-					//handle events on each object
-					for (auto map : { &currentScreen->objects, &currentScreen->gObjects, &currentScreen->uiObjects })
-					{
-						handleEvents(map, event);
-					}
+					// update the view to the new size of the window
+					sf::FloatRect visibleArea(0.f, 0.f, static_cast<float>(ev.size.width), static_cast<float>(ev.size.height));
+					view = sf::View(visibleArea);
 				}
+				//handle events on each object
+				for (auto & pair : this->allObjects)
+				{
+					GameObject* obj = pair.second;
+					if (!obj->eventsDisabled) { obj->dispatchEvent(ev); }
+				}
+			}
+			#ifdef _DEBUG
+			eventDurationSum += eventClock.getElapsedTime().asMicroseconds();
+			movementClock.restart();
+			#endif
 
-				window.clear();
+			//handle movement and terrain collision
+			for (auto const & pair : this->movingObjectsWithTerrainCollision)
+			{
+				GameObjectAttribute::Movement* obj = pair.second;
+				if (obj->xVelocity == 0.0 && obj->yVelocity == 0.0) { continue; }
+				sf::Sprite* spr = obj->getDrawablePtr();
+				sf::Vector2f position = spr->getPosition();
+				sf::Vector2f velocity = obj->getVelocity();
+				obj->xVelocity = 0.0;
+				obj->yVelocity = 0.0;
+				sf::FloatRect collisionSize = dynamic_cast<TerrainCollision*>(obj)->getObstacleCollisionSize();
+				sf::IntRect tRect = obj->getDrawablePtr()->getTextureRect();
+				auto tryMove = [&](float vx, float vy)
+				{
+					sf::Vector2f destination(position.x + vx, position.y + vy);
+					float x = destination.x + collisionSize.left;
+					float y = destination.y + collisionSize.top;
+					sf::Vector2f mapBoundsCollisionCorners[4] = {
+						{x, y},
+						{x + static_cast<float>(tRect.width), y},
+						{x + static_cast<float>(tRect.width), y + static_cast<float>(tRect.height)},
+						{x, y + static_cast<float>(tRect.height)}
+					};
+					for (auto const & corner : mapBoundsCollisionCorners)
+					{
+						if (this->tMap->isOutOfBounds(corner)) { return false; }
+					}
+					sf::Vector2f terrainCollisionCorners[4] = {
+						{x, y},
+						{x + collisionSize.width, y},
+						{x + collisionSize.width, y + collisionSize.height},
+						{x, y + collisionSize.height}
+					};
+					for (auto const & corner : terrainCollisionCorners)
+					{
+						if (this->tMap->isObstacle(corner)) { return false; }
+					}
+					spr->setPosition(destination);
+					return true;
+				};
+				if (tryMove(velocity.x, velocity.y)) { continue; }
+				if (tryMove(velocity.x, 0.f)) { continue; }
+				if (tryMove(0.f, velocity.y)) { continue; }
+			}
 
-				//draw the map
+			//handle movement of objects that ignore terrain
+			for (auto const & pair : this->movingObjects)
+			{
+				GameObjectAttribute::Movement* obj = pair.second;
+				if (obj->xVelocity == 0.0 && obj->yVelocity == 0.0) { continue; }
+				sf::Sprite* spr = obj->getDrawablePtr();
+				spr->move(obj->getVelocity());
+				obj->xVelocity = 0.0;
+				obj->yVelocity = 0.0;
+			}
+			#ifdef _DEBUG
+			movementDurationSum += movementClock.getElapsedTime().asMicroseconds();
+			collisionClock.restart();
+			#endif
 
+			//object collision
+			for (auto & p1 : this->collisionObjects)
+			{
+				GameObjectAttribute::Collision* eventReceiver = p1.second;
+				for (auto & p2 : this->collisionObjects)
+				{
+					GameObjectAttribute::Collision* eventArg = p2.second;
+					if (eventReceiver != eventArg && eventReceiver->CheckCollision(eventArg)) { eventReceiver->Collided(eventArg); }
+				}
+			}
+			#ifdef _DEBUG
+			collisionDurationSum += collisionClock.getElapsedTime().asMicroseconds();
+			drawClock.restart();
+			#endif
+
+			//draw
+			window.clear();
+
+			//draw the map
+			if (this->tMap) { window.draw(*this->tMap); }
+
+			//draw the objects
+			for (auto & pair : this->renderObjects)
+			{
+				GraphicalGameObject* obj = pair.second;
+				obj->draw(window);
+			}
+
+			//draw the UI objects
+			for (auto const & pair : this->uiObjects)
+			{
+				GraphicalGameObject* obj = pair.second;
+				sf::Transformable* transformable = dynamic_cast<sf::Transformable*>(obj->getGraphic());
+				if (!transformable) { continue; }
+				sf::Vector2f viewPos = window.getView().getCenter();
+				sf::Vector2f screenPosition = transformable->getPosition();
+				transformable->setPosition(viewPos - sf::Vector2f(static_cast<float>(this->windowWidth / 2), static_cast<float>(this->windowHeight / 2)) + screenPosition);
+				obj->draw(window);
+				transformable->setPosition(screenPosition);
+			}
+
+			//view moves with character
+			sf::Sprite* mainCharacterSprite = (this->mainCharacter != nullptr) ? dynamic_cast<sf::Sprite*>(this->mainCharacter->graphic) : nullptr;
+			if (mainCharacterSprite != nullptr)
+			{
 				unsigned int mapWidth = 0;
 				unsigned int mapHeight = 0;
-
-				if (currentScreen->map)
+				if (this->tMap != nullptr)
 				{
-					window.draw(*currentScreen->map);
-					mapWidth = currentScreen->map->width() * currentScreen->map->tileSize().x;
-					mapHeight = currentScreen->map->height() * currentScreen->map->tileSize().y;
+					mapWidth = this->tMap->width() * this->tMap->tileSize().x;
+					mapHeight = this->tMap->height() * this->tMap->tileSize().y;
 				}
-
-				//draw the objects
-				for (auto const& pair : currentScreen->gObjects)
+				sf::Vector2f pos = mainCharacterSprite->getPosition();
+				sf::Vector2f origin = mainCharacterSprite->getOrigin();
+				float x = pos.x + origin.x;
+				float y = pos.y + origin.y;
+				float fWidth = static_cast<float>(mapWidth);
+				float fHeight = static_cast<float>(mapHeight);
+				float halfWidth = static_cast<float>(windowWidth / 2);
+				float halfHeight = static_cast<float>(windowHeight / 2);
+				if (x > halfWidth && x < (fWidth - halfWidth)
+					&& y > halfHeight && y < (fHeight - halfHeight))
 				{
-					GraphicalGameObject* obj = dynamic_cast<GraphicalGameObject*>(pair.second); //does not need to be checked, they are checked on insertion into the maps
-
-					//prevent objects from leaving the map
-					if (!obj->ignoreObstacles)
-					{
-						if (sf::Transformable* transformable = dynamic_cast<sf::Transformable*>(obj->getGraphic()))
-						{
-							sf::Vector2u size(0, 0);
-							if (sf::Sprite* sprite = dynamic_cast<sf::Sprite*>(obj->getGraphic())) { size = sf::Vector2u(sprite->getTextureRect().width, sprite->getTextureRect().height); }
-#define X (transformable->getPosition().x)
-#define Y (transformable->getPosition().y)
-							if (X < 0.f) { transformable->setPosition(0.f, Y); }
-							if (Y < 0.f) { transformable->setPosition(X, 0.f); }
-							if (Y + size.y > mapHeight) { transformable->setPosition(X, static_cast<float>(mapHeight - size.y)); }
-							if (X + size.x > mapWidth) { transformable->setPosition(static_cast<float>(mapWidth - size.x), Y); }
-
-							sf::Vector2f offsets(0.f, 0.f);
-							if (obj->obstacleCollisionSize.width > 0.f && obj->obstacleCollisionSize.height > 0.f)
-							{
-								offsets.x = obj->obstacleCollisionSize.left;
-								offsets.y = obj->obstacleCollisionSize.top;
-								size.x = static_cast<unsigned int>(obj->obstacleCollisionSize.width);
-								size.y = static_cast<unsigned int>(obj->obstacleCollisionSize.height);
-							}
-
-							do
-							{
-								sf::Vector2f corners[4] = {
-									{X + static_cast<float>(offsets.x)          , Y + static_cast<float>(offsets.y)          },
-									{X + static_cast<float>(size.x + offsets.x) , Y + static_cast<float>(offsets.y)          },
-									{X + static_cast<float>(offsets.x)          , Y + static_cast<float>(size.y + offsets.y) },
-									{X + static_cast<float>(size.x + offsets.x) , Y + static_cast<float>(size.y + offsets.y) }
-								};
-
-								bool collision = false;
-								for (auto corner : corners)
-								{
-									if (currentScreen->map->isObstacle(corner))
-									{
-										collision = true;
-										break;
-									}
-								}
-								if (collision)
-								{
-									if (obj->spawnCollisionsResolved) { transformable->setPosition(obj->lastPos); }
-									else
-									{
-										auto positions = this->map->getSafeSpawnPositions();
-										transformable->setPosition(positions[rand() % positions.size()]);
-									}
-								}
-								else { obj->spawnCollisionsResolved = true; }
-							} while (!obj->spawnCollisionsResolved);
-
-							obj->lastPos = { X , Y };
-#undef X
-#undef Y
-						}
-					}
-					obj->draw(window);
+					view.setCenter(pos);
 				}
-
-				//draw the UI objects
-				for (auto const& pair : currentScreen->uiObjects)
+				else if (x >= 0.f && x <= halfWidth &&
+					y >= 0.f && y <= halfHeight)
 				{
-					GraphicalGameObject* obj = dynamic_cast<GraphicalGameObject*>(pair.second);
-					sf::Transformable* transformable = dynamic_cast<sf::Transformable*>(obj->getGraphic());
-					if (!transformable) { continue; }
-					sf::Vector2f viewPos = window.getView().getCenter();
-					sf::Vector2f screenPosition = transformable->getPosition();
-					transformable->setPosition(viewPos - sf::Vector2f(static_cast<float>(currentScreen->windowWidth / 2), static_cast<float>(currentScreen->windowHeight / 2)) + screenPosition);
-					obj->draw(window);
-					transformable->setPosition(screenPosition);
+					view.setCenter(halfWidth, halfHeight);
 				}
-
-				//trigger collision events
-				for (auto const& p1 : currentScreen->gObjects)
+				else if (x >= 0.f && x <= halfWidth &&
+					y >= fHeight - halfHeight && y <= fHeight)
 				{
-					GraphicalGameObject* eventReciever = dynamic_cast<GraphicalGameObject*>(p1.second);
-					if (eventReciever->eventsDisabled) { continue; }
-					sf::Sprite* receiverSprite = dynamic_cast<sf::Sprite*>(eventReciever->getGraphic());
-					if (!receiverSprite) { continue; }
-					for (auto const& p2 : currentScreen->gObjects)
-					{
-						GraphicalGameObject* eventArg = dynamic_cast<GraphicalGameObject*>(p2.second);
-						if (eventArg == eventReciever || !eventArg->triggerCollisionEvents || !eventReciever->triggerCollisionEvents) { continue; }
-						sf::Sprite* argSprite = dynamic_cast<sf::Sprite*>(eventArg->getGraphic());
-						if (!argSprite) { continue; }
-						sf::FloatRect r1 = receiverSprite->getGlobalBounds();
-						sf::FloatRect r2 = argSprite->getGlobalBounds();
-						if (r1.intersects(r2))
-						{
-							eventReciever->Collision(*eventArg);
-						}
-					}
+					view.setCenter(halfWidth, fHeight - halfHeight);
 				}
-
-				//view moves with character
-				if (GraphicalGameObject* mainCharGraphical = dynamic_cast<GraphicalGameObject*>(mainCharacter))
+				else if (x >= fWidth - halfWidth && x <= fWidth &&
+					y >= 0.f && y <= halfHeight)
 				{
-					if (const sf::Transformable* graphicAsTransformable = dynamic_cast<const sf::Transformable*>(mainCharGraphical->getGraphic()))
-					{
-						sf::Vector2f pos = graphicAsTransformable->getPosition();
-						float x = pos.x;
-						float y = pos.y;
-						float fWidth = static_cast<float>(mapWidth);
-						float fHeight = static_cast<float>(mapHeight);
-						float halfWidth = static_cast<float>(windowWidth / 2);
-						float halfHeight = static_cast<float>(windowHeight / 2);
-						if (x > halfWidth && x < (fWidth - halfWidth)
-							&& y > halfHeight && y < (fHeight - halfHeight))
-						{
-							view.setCenter(pos);
-						}
-						else if (x >= 0.f && x <= halfWidth &&
-							y >= 0.f && y <= halfHeight)
-						{
-							view.setCenter(halfWidth, halfHeight);
-						}
-						else if (x >= 0.f && x <= halfWidth &&
-							y >= fHeight - halfHeight && y <= fHeight)
-						{
-							view.setCenter(halfWidth, fHeight - halfHeight);
-						}
-						else if (x >= fWidth - halfWidth && x <= fWidth &&
-							y >= 0.f && y <= halfHeight)
-						{
-							view.setCenter(fWidth - halfWidth, halfHeight);
-						}
-						else if (x >= fWidth - halfWidth && x <= fWidth &&
-							y >= fHeight - halfHeight && y <= fHeight)
-						{
-							view.setCenter(fWidth - halfWidth, fHeight - halfHeight);
-						}
-						else if (x > halfWidth && x < fWidth - halfWidth &&
-							y >= 0.f && y <= halfHeight)
-						{
-							view.setCenter(x, halfHeight);
-						}
-						else if (x > halfWidth && x < fWidth - halfWidth &&
-							y >= fHeight - halfHeight && y <= fHeight)
-						{
-							view.setCenter(x, fHeight - halfHeight);
-						}
-						else if (x >= 0.f && x <= halfWidth &&
-							y > halfHeight && y < fHeight - halfHeight)
-						{
-							view.setCenter(halfWidth, y);
-						}
-						else if (x >= fWidth - halfWidth && x <= fWidth &&
-							y > halfHeight && y < mapHeight - halfHeight)
-						{
-							view.setCenter(fWidth - halfWidth, y);
-						}
-					}
+					view.setCenter(fWidth - halfWidth, halfHeight);
 				}
-				window.setView(view);
-				window.display();
-
-				//remove objects that are pending to be removed
-				while (!removeQueue.empty())
+				else if (x >= fWidth - halfWidth && x <= fWidth &&
+					y >= fHeight - halfHeight && y <= fHeight)
 				{
-					GameObject* toRemove = removeQueue.front();
-					removeQueue.pop();
-					for (auto map : { &currentScreen->objects, &currentScreen->gObjects, &currentScreen->uiObjects })
-					{
-						if (map->find(toRemove->getID()) != map->end())
-						{
-							GameObjectID id = toRemove->getID();
-							toRemove->RemovedFromScreen();
-							map->erase(id);
-							delete toRemove;
-							break;
-						}
-					}
+					view.setCenter(fWidth - halfWidth, fHeight - halfHeight);
 				}
-
+				else if (x > halfWidth && x < fWidth - halfWidth &&
+					y >= 0.f && y <= halfHeight)
+				{
+					view.setCenter(x, halfHeight);
+				}
+				else if (x > halfWidth && x < fWidth - halfWidth &&
+					y >= fHeight - halfHeight && y <= fHeight)
+				{
+					view.setCenter(x, fHeight - halfHeight);
+				}
+				else if (x >= 0.f && x <= halfWidth &&
+					y > halfHeight && y < fHeight - halfHeight)
+				{
+					view.setCenter(halfWidth, y);
+				}
+				else if (x >= fWidth - halfWidth && x <= fWidth &&
+					y > halfHeight && y < mapHeight - halfHeight)
+				{
+					view.setCenter(fWidth - halfWidth, y);
+				}
 			}
-			catch (GameException::FileLoadException& e)
+			#ifdef _DEBUG
+			drawDurationSum += drawClock.getElapsedTime().asMicroseconds();
+			#endif
+
+			window.setView(view);
+			window.display();
+
+			//remove objects that are pending to be removed
+			while (!removeQueue.empty())
 			{
-				std::cout << "Failed to load file: " << e.getFileName() << std::endl;
-				std::cout << " -- Fatal error. Program must terminate." << std::endl;
+				std::pair<GameObject*, bool> pRemove = removeQueue.front();
+				GameObject* toRemove = pRemove.first;
+				bool autoDelete = pRemove.second;
+				bool removed = false;
+				removeQueue.pop();
+				GameObjectID id = toRemove->getID();
+				if(	this->allObjects.erase(id) |
+					this->renderObjects.erase(id) |
+					this->uiObjects.erase(id) |
+					this->collisionObjects.erase(id) |
+					this->movingObjects.erase(id) |
+					this->movingObjectsWithTerrainCollision.erase(id))
+				{
+					toRemove->RemovedFromScreen();
+					if (autoDelete) { delete toRemove; }
+				}
 			}
-			catch (...)
+
+			#ifdef _DEBUG
+			frameDurationSum += clock.getElapsedTime().asMicroseconds();
+			int avgFrameReportFrequency = 60;
+			if (frameCount % avgFrameReportFrequency == 0)
 			{
-#ifdef _DEBUG
-				std::cout << "DEBUG: Unknown error." << std::endl;
-#endif
+				DebugManager::MessageType msgType = DebugManager::MessageType::PERFORMANCE_REPORTING;
+				DebugManager::PrintMessage(msgType, string("\naverage event compute time: ") + std::to_string(eventDurationSum / avgFrameReportFrequency));
+				DebugManager::PrintMessage(msgType, string("average movement compute time: ") + std::to_string(movementDurationSum / avgFrameReportFrequency));
+				DebugManager::PrintMessage(msgType, string("average collision compute time: ") + std::to_string(collisionDurationSum / avgFrameReportFrequency));
+				DebugManager::PrintMessage(msgType, string("average draw compute time: ") + std::to_string(drawDurationSum / avgFrameReportFrequency));
+				DebugManager::PrintMessage(msgType, string("average total compute time: ") + std::to_string(frameDurationSum / avgFrameReportFrequency));
+				DebugManager::PrintMessage(msgType, string("max total before slowdown: ") + std::to_string(frameDurationMicroseconds));
+				frameDurationSum = 0;
+				eventDurationSum = 0;
+				movementDurationSum = 0;
+				collisionDurationSum = 0;
+				drawDurationSum = 0;
 			}
+			#endif
 			frameCount++;
-			while (clock.getElapsedTime().asMicroseconds() < (1000000 / currentFPS)) {}
+			while (clock.getElapsedTime().asMicroseconds() < frameDurationMicroseconds) {}
 		}
+		//end game loop
 
 		if (pendingSwitch)
 		{
@@ -460,5 +417,45 @@ namespace Engine
 
 	Screen::~Screen()
 	{
+		vector<GameObject*> objs;
+		for (auto const & iter : this->allObjects)
+		{
+			objs.push_back(iter.second);
+		}
+		for (auto const & obj : objs)
+		{
+			this->remove(obj);
+		}
+	}
+	
+	class Scheduler : public GameObject
+	{
+	private:
+		uint64_t delay;
+		uint64_t countdown;
+		uint16_t repeatsRemaining;
+		bool infinite;
+		function<void()> func;
+	public:
+		Scheduler( function<void()> func, uint64_t delay, uint16_t repeatCount) : delay(delay), countdown(delay), repeatsRemaining(repeatCount), infinite(repeatCount == 0), func(func) {}
+		void EveryFrame(uint64_t f)
+		{
+			if (this->countdown == 0)
+			{
+				func();
+				if (repeatsRemaining > 0)
+				{
+					repeatsRemaining--;
+					this->countdown = this->delay;
+				}
+				else if(!this->infinite) { this->screen->remove(this); }				
+			}
+			else { this->countdown--; }
+		}
+	};
+
+	void Screen::schedule(function<void()> func, TimeUnit::Time delay, uint16_t repeatCount)
+	{
+		this->add(new Scheduler(func, delay, repeatCount));
 	}
 }

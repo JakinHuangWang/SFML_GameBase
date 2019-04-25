@@ -5,36 +5,30 @@
 #include "Screen.h"
 #include "Menu.h"
 #include "FileLoadException.h"
+#include "SpriteFactory.h"
 
 using namespace Engine;
 
 class Tutorial : public GraphicalGameObject
 {
 private:
-	sf::Texture storyTexture;
 	sf::Sprite story;
-	sf::Texture tutorialTexture;
 	sf::Sprite tutorial;
-	sf::Texture bookButtonTexture;
 	sf::Sprite bookButton;
-	sf::Texture xButtonTexture;
 	sf::Sprite xButton;
 	sf::Color currColor;
 	int internalClock = 0;
 	bool resetClock = false;
 	bool showStory = true;
 public:
-	Tutorial() : GraphicalGameObject(sf::Sprite())
+	Tutorial()
+		: GraphicalGameObject(sf::Sprite()),
+		story(SpriteFactory::generateSprite(Sprite::ID::Story)),
+		tutorial(SpriteFactory::generateSprite(Sprite::ID::Tutorial)),
+		bookButton(SpriteFactory::generateSprite(Sprite::ID::BookButton)),
+		xButton(SpriteFactory::generateSprite(Sprite::ID::XButton))
 	{
-		if (!this->storyTexture.loadFromFile("story.png")) { throw GameException::ImageFileLoadException("story.png"); }
-		this->story.setTexture(storyTexture);
-		if (!this->tutorialTexture.loadFromFile("tutorial.png")) { throw GameException::ImageFileLoadException("tutorial.png"); }
-		this->tutorial.setTexture(tutorialTexture);
-		if (!this->bookButtonTexture.loadFromFile("book_button.png")) { throw GameException::ImageFileLoadException("book_button.png"); }
-		this->bookButton.setTexture(bookButtonTexture);
 		this->bookButton.setPosition(Screen::windowWidth - 280.f, Screen::windowHeight - 260.f);
-		if (!this->xButtonTexture.loadFromFile("x_button.png")) { throw GameException::ImageFileLoadException("x_button.png"); }
-		this->xButton.setTexture(this->xButtonTexture);
 		this->xButton.setPosition(Screen::windowWidth - 55.f, 15.f);
 		for (auto obj : Menu::getCurrentMenu()->getMenuObjects()) { if (obj != this) { obj->disableEvents(); } }
 	}

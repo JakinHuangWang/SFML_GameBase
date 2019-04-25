@@ -4,6 +4,8 @@
 #include "Screen.h"
 #include "ZombieBlast.h"
 #include "FileLoadException.h"
+#include "SpriteFactory.h"
+#include "GameObjectAttribute.h"
 
 using namespace Engine;
 
@@ -12,34 +14,41 @@ enum class DIRECTION
 	UP, DOWN, LEFT, RIGHT
 };
 
-class MageBlast : public GraphicalGameObject
+class MageBlast :
+	public GraphicalGameObject,
+	public Collision,
+	public Movement,
+	public Attacker
 {
 private:
 	sf::Vector2f movePerFrame;
-	sf::Texture texture;
+	sf::Vector2f baseSpeed;
 	int life;
 	int hitsAgainstPlayer = 0;
+	float rotationRate;
 public:
-	MageBlast(const sf::Vector2f& pos, const sf::Vector2f& destination, double speed, int duration) : GraphicalGameObject(sf::Sprite())
+	MageBlast(const sf::Vector2f& pos, const sf::Vector2f& destination, double speed, int duration) :
+		GraphicalGameObject(SpriteFactory::generateSprite(Sprite::ID::Mageblast))
 	{
-		this->ignoreObstacles = true;
-		this->blockingCollision = false;
-		if (!this->texture.loadFromFile("mageblast.png")) { throw GameException::ImageFileLoadException("mageblast.png"); }
-		this->spritePtr()->setTexture(this->texture);
 		this->spritePtr()->setPosition(pos);
-		sf::Vector2u size = this->texture.getSize();
+		sf::Vector2u size = this->spritePtr()->getTexture()->getSize();
 		this->spritePtr()->setOrigin(static_cast<float>(size.x) / 2.f, static_cast<float>(size.y) / 2.f);
 		double radians = atan2(static_cast<double>(destination.y - pos.y), static_cast<double>(destination.x - pos.x));
-		this->movePerFrame = { static_cast<float>(speed * cos(radians)), static_cast<float>(speed * sin(radians)) };
+		this->baseSpeed = { static_cast<float>(speed * cos(radians)), static_cast<float>(speed * sin(radians)) };
+		this->movePerFrame = this->baseSpeed;
 		this->life = duration;
+		srand(static_cast<unsigned int>(this->getID()));
+		this->rotationRate = (rand() % 2 == 0) ? 3.5f : -3.5f;
 	}
 
 	void EveryFrame(uint64_t f)
 	{
 		sf::Sprite* spr = this->spritePtr();
-		spr->move(this->movePerFrame);
-		spr->rotate(3.f);
+		this->move(this->movePerFrame);
+		spr->rotate(this->rotationRate);
 		spr->setScale(cos(static_cast<float>(this->life)), sin(static_cast<float>(this->life)));
+		this->movePerFrame.x += DifficultySettings::Mage::blastSpeedAccel * this->baseSpeed.x;
+		this->movePerFrame.y += DifficultySettings::Mage::blastSpeedAccel * this->baseSpeed.y;
 		this->life--;
 		if (this->life <= 20)
 		{
@@ -50,13 +59,15 @@ public:
 		if (this->life <= 0) { this->screen->remove(this); }
 	}
 
-	void Collision(GraphicalGameObject& other)
+	void Collided(GraphicalGameObject* other)
 	{
-		if (dynamic_cast<SuperZombieBlast*>(&other) && this->life > 20)
+		if (dynamic_cast<SuperZombieBlast*>(other) && this->life > 20)
 		{
 			this->life = 20;
-			this->movePerFrame.x /= 4.f;
-			this->movePerFrame.y /= 4.f;
+			this->baseSpeed.x = 0.f;
+			this->baseSpeed.y = 0.f;
+			this->movePerFrame.x /= 4.5f;
+			this->movePerFrame.y /= 4.5f;
 		}
 	}
 
